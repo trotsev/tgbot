@@ -330,6 +330,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Точка входа ===
 if __name__ == '__main__':
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
+
+    print("Бот запущен...")
+
     init_db()
 
     app = ApplicationBuilder().token(TOKEN).build()
