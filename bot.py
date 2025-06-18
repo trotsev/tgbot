@@ -11,8 +11,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
     filters,
-    JobQueue
 )
+
 import openpyxl
 
 
@@ -157,16 +157,6 @@ def save_to_excel():
     return file_path
 
 
-# === Отправка отчета администратору ===
-async def send_report(context: ContextTypes.DEFAULT_TYPE):
-    file_path = save_to_excel()
-    try:
-        with open(file_path, 'rb') as f:
-            await context.bot.send_document(chat_id=ADMIN_ID, document=f)
-    except Exception as e:
-        print(f"Ошибка при отправке отчета: {e}")
-
-
 # === Клавиатура ===
 def get_main_keyboard(user_id):
     buttons = [
@@ -222,11 +212,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
 
         if tariff == 'суточный':
-            await query.message.reply_text("Введите общее значение:")
+            await query.message.reply_text("Введите показания:")
         elif tariff == 'двухтарифный':
-            await query.message.reply_text("Введите показания для пиковой зоны:")
+            await query.message.reply_text("Введите показания для дневной и ночной тарифной зоны через запятую:")
         elif tariff == 'трехтарифный':
-            await query.message.reply_text("Введите показания для пиковой зоны:")
+            await query.message.reply_text("Введите показания для пиковой, полупиковой и ночной зоны через запятую:")
 
     elif query.data == 'export':
         if user.id != ADMIN_ID:
@@ -347,10 +337,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
-
-    # Ежедневная отправка отчета администратору
-    job_queue = app.job_queue
-    job_queue.run_daily(send_report, time=datetime.time(hour=9, minute=0))
 
     print("Бот запущен...")
     app.run_polling()
