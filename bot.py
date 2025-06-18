@@ -1,13 +1,4 @@
 import os
-import os
-
-# Проверка токена
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-if not TOKEN or TOKEN == "":
-    raise ValueError("token is empty.")
-   print(f"used token: {TOKEN}")
-
-ADMIN_ID = int(os.getenv('ADMIN_ID'))
 import sqlite3
 import json
 from datetime import datetime
@@ -342,7 +333,10 @@ if __name__ == '__main__':
     import sys
     sys.stdout.reconfigure(encoding='utf-8')
 
-    print("Бот запущен...")
+    # Проверка токена
+    if not TOKEN or TOKEN == "":
+        raise ValueError("Токен Telegram-бота не установлен или пустой.")
+    print(f"Используемый токен: {TOKEN}")
 
     init_db()
 
