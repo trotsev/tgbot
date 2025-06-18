@@ -1,4 +1,13 @@
 import os
+import os
+
+# Проверка токена
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+if not TOKEN or TOKEN == "":
+    raise ValueError("token is empty.")
+   print(f"used token: {TOKEN}")
+
+ADMIN_ID = int(os.getenv('ADMIN_ID'))
 import sqlite3
 import json
 from datetime import datetime
