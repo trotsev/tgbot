@@ -46,7 +46,7 @@ def init_db():
 def get_user_by_id(user_id):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    cur.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
     user = cur.fetchone()
     conn.close()
     return user
@@ -321,7 +321,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Выберите тариф:", reply_markup=InlineKeyboardMarkup(tariff_kb))
 
         elif step == 'tariff':
-            pass  # Это перехватывается отдельным handler'ом
+            pass  # Это обрабатывается отдельным handler'ом
 
     # --- Ввод показаний ---
     elif 'reading' in context.user_data:
@@ -342,7 +342,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tariff == 'суточный' and len(values) == 1:
             add_reading(reading_data['meter_id'], {"total": values[0]})
             del context.user_data['reading']
-            await update.message.reply_text("Показание сохранено.")
+            await update.message.reply_text("Показание сохранено!")
 
         elif tariff == 'двухтарифный' and len(values) < 2:
             if step == 1:
@@ -351,7 +351,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif tariff == 'двухтарифный' and len(values) == 2:
             add_reading(reading_data['meter_id'], {"peak": values[0], "night": values[1]})
             del context.user_data['reading']
-            await update.message.reply_text("Показания (пик и ночь) сохранены.")
+            await update.message.reply_text("Показания (пик и ночь) сохранены!")
 
         elif tariff == 'трехтарифный' and len(values) < 3:
             if step == 1:
@@ -362,7 +362,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif tariff == 'трехтарифный' and len(values) == 3:
             add_reading(reading_data['meter_id'], {"peak": values[0], "semi_peak": values[1], "night": values[2]})
             del context.user_data['reading']
-            await update.message.reply_text("Показания (пик, полупик, ночь) сохранены.")
+            await update.message.reply_text("Показания (пик, полупик, ночь) сохранены!")
 
 
 # === Выбор тарифа через кнопки ===
@@ -396,6 +396,8 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         )
         del context.user_data['registration_step']
         await query.message.reply_text("Вы успешно зарегистрированы!")
+        await query.message.reply_text("Чтобы начать передавать показания, нажмите на кнопку ниже.",
+                                      reply_markup=get_main_menu_keyboard(user.id))
 
 
 # === Точка входа ===
