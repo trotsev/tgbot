@@ -46,7 +46,7 @@ def init_db():
 def get_user_by_id(user_id):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
+    cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = cur.fetchone()
     conn.close()
     return user
@@ -155,10 +155,8 @@ def save_to_excel():
 
 
 # === Клавиатура ===
-def get_main_menu_keyboard(user_id):
-    buttons = [
-        [InlineKeyboardButton("Меню", callback_data='main_menu')]
-    ]
+def get_main_menu_keyboard():
+    buttons = [[InlineKeyboardButton("Меню", callback_data='main_menu')]]
     return InlineKeyboardMarkup(buttons)
 
 
@@ -167,8 +165,8 @@ def get_full_menu_keyboard(user_id):
 
     if not get_user_by_id(user_id):
         buttons.append([InlineKeyboardButton("Зарегистрироваться", callback_data='register')])
-
-    buttons.append([InlineKeyboardButton("Передать показания", callback_data='submit_reading')])
+    else:
+        buttons.append([InlineKeyboardButton("Передать показания", callback_data='submit_reading')])
 
     if user_id == ADMIN_ID:
         buttons += [
@@ -182,7 +180,7 @@ def get_full_menu_keyboard(user_id):
 
 # === Обработчики команд ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Добро пожаловать!", reply_markup=get_main_menu_keyboard(update.effective_user.id))
+    await update.message.reply_text("Добро пожаловать!", reply_markup=get_main_menu_keyboard())
 
 
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +193,7 @@ async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.message.delete()
-    await query.message.reply_text("Главное меню:", reply_markup=get_main_menu_keyboard(query.from_user.id))
+    await query.message.reply_text("Главное меню:", reply_markup=get_main_menu_keyboard())
 
 
 # === Обработка кнопок ===
@@ -396,8 +394,8 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         )
         del context.user_data['registration_step']
         await query.message.reply_text("Вы успешно зарегистрированы!")
-        await query.message.reply_text("Чтобы начать передавать показания, нажмите на кнопку ниже.",
-                                      reply_markup=get_main_menu_keyboard(user.id))
+        await query.message.reply_text("Чтобы начать передавать показания, нажмите «Меню».",
+                                      reply_markup=get_main_menu_keyboard())
 
 
 # === Точка входа ===
