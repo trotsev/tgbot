@@ -46,7 +46,7 @@ def init_db():
 def get_user_by_id(user_id):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
+    cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     user = cur.fetchone()
     conn.close()
     return user
@@ -185,11 +185,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добро пожаловать!", reply_markup=get_main_menu_keyboard(update.effective_user.id))
 
 
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user = update.effective_user
     await query.answer()
-    await query.message.reply_text("Выберите действие:", reply_markup=get_full_menu_keyboard(user.id))
+    await query.message.reply_text("Выберите действие:", reply_markup=get_full_menu_keyboard(query.from_user.id))
 
 
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -205,13 +204,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await query.answer()
 
-    if query.data == 'main_menu':
-        await menu_handler(update, context)
-
-    elif query.data == 'back_to_start':
-        await back_to_start(update, context)
-
-    elif query.data == 'register':
+    if query.data == 'register':
         users = get_all_users()
         if len(users) >= MAX_USERS:
             await query.message.reply_text("Регистрация невозможна — достигнут лимит пользователей.")
@@ -281,6 +274,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
         await query.message.reply_text("Удаление отменено.", reply_markup=get_full_menu_keyboard(ADMIN_ID))
 
+    elif query.data == 'back_to_start':
+        await back_to_start(update, context)
+
+    elif query.data == 'main_menu':
+        await show_menu(update, context)
+
 
 # === Обработка текстовых сообщений ===
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,11 +321,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Выберите тариф:", reply_markup=InlineKeyboardMarkup(tariff_kb))
 
         elif step == 'tariff':
-            tariff = context.user_data['tariff']
-            add_user(user.id, context.user_data['phone'], context.user_data['flat'],
-                     context.user_data['meter'], tariff)
-            del context.user_data['registration_step']
-            await update.message.reply_text("Вы успешно зарегистрированы!")
+            pass  # Это перехватывается отдельным handler'ом
 
     # --- Ввод показаний ---
     elif 'reading' in context.user_data:
@@ -370,8 +365,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Показания (пик, полупик, ночь) сохранены.")
 
 
-# === Обработка выбора тарифа через кнопки ===
-async def tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === Выбор тарифа через кнопки ===
+async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
     await query.answer()
@@ -390,7 +385,6 @@ async def tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data['tariff'] = tariff
-        await query.message.edit_reply_markup(reply_markup=None)
 
         # Сохраняем пользователя
         add_user(
@@ -415,9 +409,14 @@ if __name__ == '__main__':
 
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # Команды
     app.add_handler(CommandHandler("start", start))
+
+    # Inline-кнопки
     app.add_handler(CallbackQueryHandler(button_handler, pattern=r'^(main_menu|back_to_start|submit_reading|export|delete_user|delete_\d+|cancel_delete|register)$'))
-    app.add_handler(CallbackQueryHandler(tariff_selection, pattern=r'^tariff_.+$'))
+    app.add_handler(CallbackQueryHandler(handle_tariff_selection, pattern=r'^tariff_.+$'))
+
+    # Текстовые сообщения
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     app.run_polling()
