@@ -243,8 +243,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         file_path = save_to_excel()
-        with open(file_path, 'rb') as f:
-            await context.bot.send_document(chat_id=user.id, document=f, filename="report.xlsx")
+        try:
+            with open(file_path, 'rb') as f:
+                await context.bot.send_document(chat_id=user.id, document=f, filename="report.xlsx")
+        except Exception as e:
+            await query.message.reply_text(f"Ошибка при создании файла: {e}")
+        finally:
+            await query.message.reply_text("Меню:", reply_markup=get_full_menu_keyboard(user.id))
 
     elif query.data == 'delete_user':
         if user.id != ADMIN_ID:
@@ -340,7 +345,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if tariff == 'суточный' and len(values) == 1:
             add_reading(reading_data['meter_id'], {"total": values[0]})
             del context.user_data['reading']
-            await update.message.reply_text("Показание сохранено!")
+            await update.message.reply_text("Показание сохранено!", reply_markup=get_main_menu_keyboard())
 
         elif tariff == 'двухтарифный' and len(values) < 2:
             if step == 1:
@@ -349,7 +354,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif tariff == 'двухтарифный' and len(values) == 2:
             add_reading(reading_data['meter_id'], {"peak": values[0], "night": values[1]})
             del context.user_data['reading']
-            await update.message.reply_text("Показания (пик и ночь) сохранены!")
+            await update.message.reply_text("Показания (пик и ночь) сохранены!", reply_markup=get_main_menu_keyboard())
 
         elif tariff == 'трехтарифный' and len(values) < 3:
             if step == 1:
@@ -360,7 +365,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif tariff == 'трехтарифный' and len(values) == 3:
             add_reading(reading_data['meter_id'], {"peak": values[0], "semi_peak": values[1], "night": values[2]})
             del context.user_data['reading']
-            await update.message.reply_text("Показания (пик, полупик, ночь) сохранены!")
+            await update.message.reply_text("Показания (пик, полупик, ночь) сохранены!", reply_markup=get_main_menu_keyboard())
 
 
 # === Выбор тарифа через кнопки ===
