@@ -249,7 +249,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await query.message.reply_text(f"Ошибка при создании файла: {e}")
         finally:
-            await query.message.reply_text("Меню:", reply_markup=get_full_menu_keyboard(user.id))
+            await query.message.reply_text("Меню:", reply_markup=get_full_menu_keyboard(ADMIN_ID))
 
     elif query.data == 'delete_user':
         if user.id != ADMIN_ID:
