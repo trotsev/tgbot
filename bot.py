@@ -13,9 +13,6 @@ from telegram.ext import (
     filters,
 )
 
-import openpyxl
-
-
 # === Конфигурация ===
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Получаем из переменной окружения
 ADMIN_ID = int(os.getenv('ADMIN_ID'))     # ID администратора
@@ -52,22 +49,13 @@ def get_user_by_id(user_id):
     return user
 
 
-def get_users_count():
+def get_all_users():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM users")
-    count = cur.fetchone()[0]
+    cur.execute("SELECT user_id, flat, meter_id FROM users")
+    rows = cur.fetchall()
     conn.close()
-    return count
-
-
-def add_user(user_id, phone, flat, meter_id, tariff):
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?)",
-                (user_id, phone, flat, meter_id, tariff))
-    conn.commit()
-    conn.close()
+    return rows
 
 
 def delete_user(user_id):
@@ -83,6 +71,15 @@ def delete_user(user_id):
     conn.close()
 
 
+def add_user(user_id, phone, flat, meter_id, tariff):
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?)",
+                (user_id, phone, flat, meter_id, tariff))
+    conn.commit()
+    conn.close()
+
+
 # === Работа с БД: показания ===
 def add_reading(meter_id, values_dict):
     conn = sqlite3.connect(DB_NAME)
@@ -92,69 +89,6 @@ def add_reading(meter_id, values_dict):
                 (meter_id, values_json, datetime.now()))
     conn.commit()
     conn.close()
-
-
-def get_all_readings():
-    conn = sqlite3.connect(DB_NAME)
-    cur = conn.cursor()
-    cur.execute('''SELECT u.flat, r.meter_id, r.value_json, u.phone, r.date 
-                   FROM readings r
-                   JOIN users u ON r.meter_id = u.meter_id
-                   ORDER BY r.date DESC''')
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-
-# === Формирование Excel файла ===
-def save_to_excel():
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Показания"
-    ws.append(['Номер квартиры', 'Предыдущие показания', 'Текущие показания', 'Номер телефона', 'Дата'])
-
-    seen = {}  # {meter_id: {flat, phone, prev, current, date}}
-
-    for row in get_all_readings():
-        flat, meter, value_json, phone, date_str = row
-        date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-        values = json.loads(value_json)
-
-        if meter not in seen:
-            seen[meter] = {
-                "flat": flat,
-                "phone": phone,
-                "values": [values],
-                "date": date
-            }
-        else:
-            seen[meter]["values"].append(values)
-            seen[meter]["date"] = date
-
-    for meter in seen:
-        data = seen[meter]
-        values_list = data["values"]
-        last_values = values_list[0]
-
-        if len(values_list) > 1:
-            prev_values = values_list[1]
-        else:
-            prev_values = {}
-
-        def format_value(val):
-            return ", ".join([f"{k}: {v}" for k, v in val.items()]) if isinstance(val, dict) else str(val)
-
-        ws.append([
-            data["flat"],
-            format_value(prev_values),
-            format_value(last_values),
-            data["phone"],
-            data["date"].strftime("%d.%m.%Y")
-        ])
-
-    file_path = "report.xlsx"
-    wb.save(file_path)
-    return file_path
 
 
 # === Клавиатура ===
@@ -185,7 +119,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == 'register':
-        if get_users_count() >= MAX_USERS:
+        users = get_all_users()
+        if len(users) >= MAX_USERS:
             await query.message.reply_text("Регистрация невозможна — достигнут лимит пользователей.")
             return
 
@@ -208,28 +143,100 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['reading'] = {
             'tariff': tariff,
             'meter_id': meter_id,
-            'values': []
+            'values': [],
+            'step': 0
         }
 
         if tariff == 'суточный':
-            await query.message.reply_text("Введите показания:")
+            await query.message.reply_text("Введите общее значение:")
         elif tariff == 'двухтарифный':
-            await query.message.reply_text("Введите показания для дневной и ночной тарифной зоны через запятую:")
+            await query.message.reply_text("Введите показания пиковой зоны:")
         elif tariff == 'трехтарифный':
-            await query.message.reply_text("Введите показания для пиковой, полупиковой и ночной зоны через запятую:")
+            await query.message.reply_text("Введите показания пиковой зоны:")
 
     elif query.data == 'export':
         if user.id != ADMIN_ID:
             return
-        file_path = save_to_excel()
+
+        readings = []
+        conn = sqlite3.connect(DB_NAME)
+        cur = conn.cursor()
+        cur.execute('''SELECT u.flat, r.meter_id, r.value_json, u.phone, r.date 
+                       FROM readings r
+                       JOIN users u ON r.meter_id = u.meter_id
+                       ORDER BY r.date DESC''')
+        rows = cur.fetchall()
+        conn.close()
+
+        seen = {}  # {meter_id: {flat, phone, prev, current, date}}
+        for row in rows:
+            flat, meter, value_json, phone, date_str = row
+            date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+            values = json.loads(value_json)
+
+            if meter not in seen:
+                seen[meter] = {
+                    "flat": flat,
+                    "phone": phone,
+                    "values": [values],
+                    "date": date
+                }
+            else:
+                seen[meter]["values"].append(values)
+                seen[meter]["date"] = date
+
+        file_path = 'report.xlsx'
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Показания"
+        ws.append(['Номер квартиры', 'Предыдущие показания', 'Текущие показания', 'Номер телефона', 'Дата'])
+
+        for meter in seen:
+            data = seen[meter]
+            values_list = data["values"]
+            last_values = values_list[0]
+            prev_values = values_list[1] if len(values_list) > 1 else {}
+
+            def format_value(val):
+                return ", ".join([f"{k}: {v}" for k, v in val.items()]) if isinstance(val, dict) else str(val)
+
+            ws.append([
+                data["flat"],
+                format_value(prev_values),
+                format_value(last_values),
+                data["phone"],
+                data["date"].strftime("%d.%m.%Y")
+            ])
+
+        wb.save(file_path)
         with open(file_path, 'rb') as f:
             await context.bot.send_document(chat_id=user.id, document=f)
 
     elif query.data == 'delete_user':
         if user.id != ADMIN_ID:
             return
-        context.user_data['delete_step'] = True
-        await query.message.reply_text("Введите ID пользователя для удаления:")
+        users = get_all_users()
+        if not users:
+            await query.message.reply_text("Нет пользователей для удаления.")
+            return
+
+        keyboard = []
+        for user_row in users:
+            user_id, flat, meter = user_row
+            btn_text = f"ID: {user_id} | Квартира: {flat} | Прибор: {meter}"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f'delete_{user_id}')])
+        keyboard.append([InlineKeyboardButton("<< Отмена", callback_data='cancel_delete')])
+        await query.message.edit_text("Выберите пользователя для удаления:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif query.data.startswith('delete_'):
+        target_id = int(query.data.split('_')[1])
+        delete_user(target_id)
+        await query.message.edit_text(f"Пользователь {target_id} удален.")
+        await query.message.reply_text("Меню:", reply_markup=get_main_keyboard(ADMIN_ID))
+
+    elif query.data == 'cancel_delete':
+        await query.message.delete()
+        await query.message.reply_text("Удаление отменено.", reply_markup=get_main_keyboard(ADMIN_ID))
 
 
 # === Обработка текстовых сообщений ===
@@ -283,6 +290,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reading_data = context.user_data['reading']
         tariff = reading_data['tariff']
         values = reading_data['values']
+        step = reading_data['step']
 
         try:
             value = int(text)
@@ -291,41 +299,32 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         values.append(value)
+        reading_data['step'] += 1
 
         if tariff == 'суточный' and len(values) == 1:
             add_reading(reading_data['meter_id'], {"total": values[0]})
             del context.user_data['reading']
             await update.message.reply_text("Показание сохранено.")
 
+        elif tariff == 'двухтарифный' and len(values) < 2:
+            if step == 1:
+                await update.message.reply_text("Введите показания ночной зоны:")
+
         elif tariff == 'двухтарифный' and len(values) == 2:
             add_reading(reading_data['meter_id'], {"peak": values[0], "night": values[1]})
             del context.user_data['reading']
             await update.message.reply_text("Показания (пик и ночь) сохранены.")
 
+        elif tariff == 'трехтарифный' and len(values) < 3:
+            if step == 1:
+                await update.message.reply_text("Введите показания полупиковой зоны:")
+            elif step == 2:
+                await update.message.reply_text("Введите показания ночной зоны:")
+
         elif tariff == 'трехтарифный' and len(values) == 3:
             add_reading(reading_data['meter_id'], {"peak": values[0], "semi_peak": values[1], "night": values[2]})
             del context.user_data['reading']
             await update.message.reply_text("Показания (пик, полупик, ночь) сохранены.")
-
-        else:
-            remaining = {
-                'суточный': 1 - len(values),
-                'двухтарифный': 2 - len(values),
-                'трехтарифный': 3 - len(values)
-            }[tariff]
-            await update.message.reply_text(f"Осталось ввести показаний: {remaining}")
-
-    # --- Удаление пользователя ---
-    elif context.user_data.get('delete_step'):
-        try:
-            target_id = int(text)
-        except ValueError:
-            await update.message.reply_text("Введите корректный ID.")
-            return
-
-        delete_user(target_id)
-        await update.message.reply_text(f"Пользователь {target_id} удален.")
-        context.user_data.clear()
 
 
 # === Точка входа ===
@@ -333,10 +332,7 @@ if __name__ == '__main__':
     import sys
     sys.stdout.reconfigure(encoding='utf-8')
 
-    # Проверка токена
-    if not TOKEN or TOKEN == "":
-        raise ValueError("Токен Telegram-бота не установлен или пустой.")
-    print(f"Используемый токен: {TOKEN}")
+    print("Бот запущен...")
 
     init_db()
 
@@ -346,5 +342,4 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    print("Бот запущен...")
     app.run_polling()
