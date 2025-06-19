@@ -46,7 +46,7 @@ def init_db():
 def get_user_by_id(user_id):
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    cur.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
     user = cur.fetchone()
     conn.close()
     return user
@@ -313,16 +313,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             context.user_data['meter'] = meter_id
             context.user_data['registration_step'] = 'tariff'
-            tariff_kb = [['суточный', 'двухтарифный', 'трехтарифный']]
-            reply_markup = InlineKeyboardMarkup(tariff_kb)
-            await update.message.reply_text("Выберите тариф:", reply_markup=reply_markup)
+
+            tariff_kb = [
+                [InlineKeyboardButton("Суточный", callback_data='tariff_su')],
+                [InlineKeyboardButton("Двухтарифный", callback_data='tariff_dv')],
+                [InlineKeyboardButton("Трёхтарифный", callback_data='tariff_tr')]
+            ]
+            await update.message.reply_text("Выберите тариф:", reply_markup=InlineKeyboardMarkup(tariff_kb))
 
         elif step == 'tariff':
-            tariff = text.lower()
-            if tariff not in ['суточный', 'двухтарифный', 'трехтарифный']:
-                await update.message.reply_text("Неверный тариф. Попробуйте снова.")
-                return
-
+            tariff = context.user_data['tariff']
             add_user(user.id, context.user_data['phone'], context.user_data['flat'],
                      context.user_data['meter'], tariff)
             del context.user_data['registration_step']
@@ -370,6 +370,40 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Показания (пик, полупик, ночь) сохранены.")
 
 
+# === Обработка выбора тарифа через кнопки ===
+async def tariff_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    await query.answer()
+
+    if 'registration_step' in context.user_data and context.user_data['registration_step'] == 'tariff':
+        tariff_map = {
+            'tariff_su': 'суточный',
+            'tariff_dv': 'двухтарифный',
+            'tariff_tr': 'трехтарифный'
+        }
+
+        selected = query.data
+        tariff = tariff_map.get(selected)
+        if not tariff:
+            await query.message.reply_text("Ошибка: неверный тариф.")
+            return
+
+        context.user_data['tariff'] = tariff
+        await query.message.edit_reply_markup(reply_markup=None)
+
+        # Сохраняем пользователя
+        add_user(
+            user.id,
+            context.user_data['phone'],
+            context.user_data['flat'],
+            context.user_data['meter'],
+            tariff
+        )
+        del context.user_data['registration_step']
+        await query.message.reply_text("Вы успешно зарегистрированы!")
+
+
 # === Точка входа ===
 if __name__ == '__main__':
     import sys
@@ -382,7 +416,8 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(CallbackQueryHandler(button_handler, pattern=r'^(main_menu|back_to_start|submit_reading|export|delete_user|delete_\d+|cancel_delete|register)$'))
+    app.add_handler(CallbackQueryHandler(tariff_selection, pattern=r'^tariff_.+$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     app.run_polling()
