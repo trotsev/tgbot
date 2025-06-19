@@ -186,7 +186,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Выберите действие:", reply_markup=get_full_menu_keyboard(query.from_user.id))
+    await query.message.edit_text("Выберите действие:", reply_markup=get_full_menu_keyboard(query.from_user.id))
 
 
 async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -396,6 +396,7 @@ async def handle_tariff_selection(update: Update, context: ContextTypes.DEFAULT_
         await query.message.reply_text("Вы успешно зарегистрированы!")
         await query.message.reply_text("Чтобы начать передавать показания, нажмите «Меню».",
                                       reply_markup=get_main_menu_keyboard())
+        await query.message.edit_reply_markup(reply_markup=None)
 
 
 # === Точка входа ===
