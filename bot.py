@@ -3,7 +3,7 @@ import sqlite3
 import json
 from datetime import datetime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -12,6 +12,9 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+
+import openpyxl
+
 
 # === Конфигурация ===
 TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')  # Получаем из переменной окружения
@@ -91,34 +94,124 @@ def add_reading(meter_id, values_dict):
     conn.close()
 
 
+# === Формирование Excel файла ===
+def save_to_excel():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Показания"
+    ws.append(['Номер квартиры', 'Предыдущие показания', 'Текущие показания', 'Номер телефона', 'Дата'])
+
+    seen = {}  # {meter_id: {flat, phone, prev, current, date}}
+
+    conn = sqlite3.connect(DB_NAME)
+    cur = conn.cursor()
+    cur.execute('''SELECT u.flat, r.meter_id, r.value_json, u.phone, r.date 
+                   FROM readings r
+                   JOIN users u ON r.meter_id = u.meter_id
+                   ORDER BY r.date DESC''')
+    rows = cur.fetchall()
+    conn.close()
+
+    for row in rows:
+        flat, meter, value_json, phone, date_str = row
+        date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        values = json.loads(value_json)
+
+        if meter not in seen:
+            seen[meter] = {
+                "flat": flat,
+                "phone": phone,
+                "values": [values],
+                "date": date
+            }
+        else:
+            seen[meter]["values"].append(values)
+            seen[meter]["date"] = date
+
+    for meter in seen:
+        data = seen[meter]
+        values_list = data["values"]
+        last_values = values_list[0]
+
+        if len(values_list) > 1:
+            prev_values = values_list[1]
+        else:
+            prev_values = {}
+
+        def format_value(val):
+            return ", ".join([f"{k}: {v}" for k, v in val.items()]) if isinstance(val, dict) else str(val)
+
+        ws.append([
+            data["flat"],
+            format_value(prev_values),
+            format_value(last_values),
+            data["phone"],
+            data["date"].strftime("%d.%m.%Y")
+        ])
+
+    file_path = "report.xlsx"
+    wb.save(file_path)
+    return file_path
+
+
 # === Клавиатура ===
-def get_main_keyboard(user_id):
+def get_main_menu_keyboard(user_id):
     buttons = [
-        [InlineKeyboardButton("Зарегистрироваться", callback_data='register')],
-        [InlineKeyboardButton("Передать показания", callback_data='submit_reading')]
+        [InlineKeyboardButton("Меню", callback_data='main_menu')]
     ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def get_full_menu_keyboard(user_id):
+    buttons = []
+
+    if not get_user_by_id(user_id):
+        buttons.append([InlineKeyboardButton("Зарегистрироваться", callback_data='register')])
+
+    buttons.append([InlineKeyboardButton("Передать показания", callback_data='submit_reading')])
+
     if user_id == ADMIN_ID:
         buttons += [
             [InlineKeyboardButton("Выгрузить данные", callback_data='export')],
             [InlineKeyboardButton("Удалить пользователя", callback_data='delete_user')]
         ]
+
+    buttons.append([InlineKeyboardButton("<< Назад", callback_data='back_to_start')])
     return InlineKeyboardMarkup(buttons)
 
 
 # === Обработчики команд ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Добро пожаловать! Нажмите кнопку ниже.",
-        reply_markup=get_main_keyboard(update.effective_user.id)
-    )
+    await update.message.reply_text("Добро пожаловать!", reply_markup=get_main_menu_keyboard(update.effective_user.id))
 
 
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user = update.effective_user
+    await query.answer()
+    await query.message.reply_text("Выберите действие:", reply_markup=get_full_menu_keyboard(user.id))
+
+
+async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.delete()
+    await query.message.reply_text("Главное меню:", reply_markup=get_main_menu_keyboard(query.from_user.id))
+
+
+# === Обработка кнопок ===
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
     await query.answer()
 
-    if query.data == 'register':
+    if query.data == 'main_menu':
+        await menu_handler(update, context)
+
+    elif query.data == 'back_to_start':
+        await back_to_start(update, context)
+
+    elif query.data == 'register':
         users = get_all_users()
         if len(users) >= MAX_USERS:
             await query.message.reply_text("Регистрация невозможна — достигнут лимит пользователей.")
@@ -158,59 +251,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user.id != ADMIN_ID:
             return
 
-        readings = []
-        conn = sqlite3.connect(DB_NAME)
-        cur = conn.cursor()
-        cur.execute('''SELECT u.flat, r.meter_id, r.value_json, u.phone, r.date 
-                       FROM readings r
-                       JOIN users u ON r.meter_id = u.meter_id
-                       ORDER BY r.date DESC''')
-        rows = cur.fetchall()
-        conn.close()
-
-        seen = {}  # {meter_id: {flat, phone, prev, current, date}}
-        for row in rows:
-            flat, meter, value_json, phone, date_str = row
-            date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-            values = json.loads(value_json)
-
-            if meter not in seen:
-                seen[meter] = {
-                    "flat": flat,
-                    "phone": phone,
-                    "values": [values],
-                    "date": date
-                }
-            else:
-                seen[meter]["values"].append(values)
-                seen[meter]["date"] = date
-
-        file_path = 'report.xlsx'
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Показания"
-        ws.append(['Номер квартиры', 'Предыдущие показания', 'Текущие показания', 'Номер телефона', 'Дата'])
-
-        for meter in seen:
-            data = seen[meter]
-            values_list = data["values"]
-            last_values = values_list[0]
-            prev_values = values_list[1] if len(values_list) > 1 else {}
-
-            def format_value(val):
-                return ", ".join([f"{k}: {v}" for k, v in val.items()]) if isinstance(val, dict) else str(val)
-
-            ws.append([
-                data["flat"],
-                format_value(prev_values),
-                format_value(last_values),
-                data["phone"],
-                data["date"].strftime("%d.%m.%Y")
-            ])
-
-        wb.save(file_path)
+        file_path = save_to_excel()
         with open(file_path, 'rb') as f:
-            await context.bot.send_document(chat_id=user.id, document=f)
+            await context.bot.send_document(chat_id=user.id, document=f, filename="report.xlsx")
 
     elif query.data == 'delete_user':
         if user.id != ADMIN_ID:
@@ -232,11 +275,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_id = int(query.data.split('_')[1])
         delete_user(target_id)
         await query.message.edit_text(f"Пользователь {target_id} удален.")
-        await query.message.reply_text("Меню:", reply_markup=get_main_keyboard(ADMIN_ID))
+        await query.message.reply_text("Меню:", reply_markup=get_full_menu_keyboard(ADMIN_ID))
 
     elif query.data == 'cancel_delete':
         await query.message.delete()
-        await query.message.reply_text("Удаление отменено.", reply_markup=get_main_keyboard(ADMIN_ID))
+        await query.message.reply_text("Удаление отменено.", reply_markup=get_full_menu_keyboard(ADMIN_ID))
 
 
 # === Обработка текстовых сообщений ===
@@ -271,7 +314,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['meter'] = meter_id
             context.user_data['registration_step'] = 'tariff'
             tariff_kb = [['суточный', 'двухтарифный', 'трехтарифный']]
-            reply_markup = ReplyKeyboardMarkup(tariff_kb, one_time_keyboard=True)
+            reply_markup = InlineKeyboardMarkup(tariff_kb)
             await update.message.reply_text("Выберите тариф:", reply_markup=reply_markup)
 
         elif step == 'tariff':
@@ -295,7 +338,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             value = int(text)
         except ValueError:
-            await update.message.reply_text("Введите число.")
+            await update.message.reply_text("Показание должно быть целым числом. Повторите ввод:")
             return
 
         values.append(value)
